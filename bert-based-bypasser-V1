@@ -1,0 +1,80 @@
+import tensorflow as tf
+from transformers import BertTokenizer, TFBertModel
+import requests
+import os
+from scapy.all import *
+
+# Check GPU availability
+print("Num GPUs Available: ", len(tf.config.list_physical_devices('GPU')))
+
+# Load BERT model and tokenizer
+tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
+bert_model = TFBertModel.from_pretrained('bert-base-uncased')
+
+# Function to generate dataset by simulating network traffic
+def generate_dataset(blocked_url):
+    data = []
+    try:
+        # Simulate network traffic to the blocked URL and capture packets
+        packets = sniff(filter=f"host {blocked_url}", count=100)
+        for packet in packets:
+            data.append(str(packet))
+    except Exception as e:
+        print(f"Error generating dataset: {e}")
+    return data
+
+# Function to train the model
+def train_model(model, dataset):
+    inputs = tokenizer(dataset, return_tensors='tf', padding=True, truncation=True)
+    outputs = model(inputs)
+    labels = [1 if 'blocked' in data else 0 for data in dataset]  # Example labels
+    labels = tf.convert_to_tensor(labels)
+    model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy'])
+    model.fit(inputs['input_ids'], labels, epochs=5)
+    return model
+
+# Function to obfuscate traffic
+def obfuscate_traffic(data):
+    obfuscated_data = data[::-1]  # Simple example of reversing the packet data
+    return obfuscated_data
+
+# Function to attempt bypass
+def attempt_bypass(model, blocked_url):
+    dataset = generate_dataset(blocked_url)
+    trained_model = train_model(model, dataset)
+    
+    # Attempt to bypass the block by obfuscating traffic
+    for data in dataset:
+        obfuscated_data = obfuscate_traffic(data)
+        response = requests.post(f"http://{blocked_url}", data=obfuscated_data)
+        if response.status_code == 200:
+            return True  # Successfully bypassed
+    return False  # Failed to bypass
+
+# Example usage
+blocked_url = input("Enter the blocked URL: ")
+
+# Generate initial dataset
+dataset = generate_dataset(blocked_url)
+
+# Train the model with initial dataset
+trained_model = train_model(bert_model, dataset)
+
+# Attempt to bypass
+success = attempt_bypass(trained_model, blocked_url)
+
+if success:
+    print("Bypass successful!")
+else:
+    print("Bypass failed. Attempting to learn and retry...")
+
+# Save the model
+model_save_path = './fine_tuned_bert_model'
+if not os.path.exists(model_save_path):
+    os.makedirs(model_save_path)
+trained_model.save_pretrained(model_save_path)
+tokenizer.save_pretrained(model_save_path)
+
+# Load the model
+loaded_model = TFBertModel.from_pretrained(model_save_path)
+loaded_tokenizer = BertTokenizer.from_pretrained(model_save_path)

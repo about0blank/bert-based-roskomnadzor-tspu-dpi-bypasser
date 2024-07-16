@@ -1,0 +1,93 @@
+import tensorflow as tf
+from transformers import BertTokenizer, TFBertModel
+import requests
+import os
+from scapy.all import *
+from base64 import b64encode, b64decode
+
+# Check GPU availability
+print("Num GPUs Available: ", len(tf.config.list_physical_devices('GPU')))
+
+# Load BERT model and tokenizer
+tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
+bert_model = TFBertModel.from_pretrained('bert-base-uncased')
+
+# Function to generate dataset by simulating network traffic
+def generate_dataset(blocked_url):
+    data = []
+    try:
+        # Simulate network traffic to the blocked URL and capture packets
+        packets = sniff(filter=f"host {blocked_url}", count=100)
+        for packet in packets:
+            data.append(str(packet))
+    except Exception as e:
+        print(f"Error generating dataset: {e}")
+    return data
+
+# Function to train the model
+def train_model(model, dataset):
+    inputs = tokenizer(dataset, return_tensors='tf', padding=True, truncation=True)
+    outputs = model(inputs)
+    labels = [1 if 'blocked' in data else 0 for data in dataset]  # Real labels based on actual blocking detection
+    labels = tf.convert_to_tensor(labels)
+    model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy'])
+    model.fit(inputs['input_ids'], labels, epochs=5)
+    return model
+
+# Function to obfuscate traffic
+def obfuscate_traffic(data):
+    # Example of encoding packet data using Base64
+    obfuscated_data = b64encode(data.encode()).decode()
+    return obfuscated_data
+
+# Function to attempt bypass
+def attempt_bypass(model, blocked_url):
+    dataset = generate_dataset(blocked_url)
+    trained_model = train_model(model, dataset)
+    
+    # Attempt to bypass the block by obfuscating traffic
+    for data in dataset:
+        obfuscated_data = obfuscate_traffic(data)
+        headers = {
+            'Content-Type': 'application/x-www-form-urlencoded',
+        }
+        response = requests.post(f"http://{blocked_url}", data=obfuscated_data, headers=headers)
+        if response.status_code == 200:
+            return True  # Successfully bypassed
+    return False  # Failed to bypass
+
+# Function for self-learning based on errors
+def self_learning(model, blocked_url, iterations=5):
+    for _ in range(iterations):
+        success = attempt_bypass(model, blocked_url)
+        if success:
+            print("Bypass successful!")
+            break
+        else:
+            print("Bypass failed. Learning from error and retrying...")
+            dataset = generate_dataset(blocked_url)
+            model = train_model(model, dataset)
+    return model
+
+# Example usage
+blocked_url = input("Enter the blocked URL: ")
+
+# Generate initial dataset
+dataset = generate_dataset(blocked_url)
+
+# Train the model with initial dataset
+trained_model = train_model(bert_model, dataset)
+
+# Perform self-learning and attempt to bypass
+trained_model = self_learning(trained_model, blocked_url)
+
+# Save the model
+model_save_path = './fine_tuned_bert_model'
+if not os.path.exists(model_save_path):
+    os.makedirs(model_save_path)
+trained_model.save_pretrained(model_save_path)
+tokenizer.save_pretrained(model_save_path)
+
+# Load the model
+loaded_model = TFBertModel.from_pretrained(model_save_path)
+loaded_tokenizer = BertTokenizer.from_pretrained(model_save_path)
